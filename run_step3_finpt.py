@@ -9,7 +9,6 @@ import sys
 import logging
 import argparse
 import gc
-import wandb
 
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score
@@ -34,7 +33,7 @@ def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
     data = load_dataset("yuweiyin/FinBench", cur_ds_name, cache_dir=cache_ds)
     fin_text_train = data["train"]["X_profile"]
     fin_text_validation = data["validation"]["X_profile"]
-    fin_text_test =  data["test"]["X_profile"]
+    fin_text_test = data["test"]["X_profile"]
 
     label_train = data["train"]["y"]
     label_validation = data["validation"]["y"]
@@ -76,9 +75,9 @@ def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
     fin_text_train = [f"{t_in} {tokenizer.eos_token}" for t_in in fin_text_train]
     fin_text_validation = [f"{t_in} {tokenizer.eos_token}" for t_in in fin_text_validation]
     fin_text_test = [f"{t_in} {tokenizer.eos_token}" for t_in in fin_text_test]
-    ds_train = {"sentence": fin_text_train, "labels": label_train, "labels_text": label_train_text, }
-    ds_val = {"sentence": fin_text_validation, "labels": label_validation, "labels_text": label_validation_text, }
-    ds_test = {"sentence": fin_text_test, "labels": label_test, "labels_text": label_test_text, }
+    ds_train = {"sentence": fin_text_train, "labels": label_train, "labels_text": label_train_text}
+    ds_val = {"sentence": fin_text_validation, "labels": label_validation, "labels_text": label_validation_text}
+    ds_test = {"sentence": fin_text_test, "labels": label_test, "labels_text": label_test_text}
 
     ds_train = Dataset.from_dict(ds_train)
     ds_val = Dataset.from_dict(ds_val)
@@ -86,13 +85,16 @@ def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
 
     ds_train = ds_train.map(
         lambda e: tokenizer(e["sentence"], truncation=True, padding="max_length", max_length=seq_len),
-        remove_columns=["sentence"], batched=True, num_proc=4)
+        remove_columns=["sentence"], batched=True, num_proc=4
+    )
     ds_val = ds_val.map(
         lambda e: tokenizer(e["sentence"], truncation=True, padding="max_length", max_length=seq_len),
-        remove_columns=["sentence"], batched=True, num_proc=4)
+        remove_columns=["sentence"], batched=True, num_proc=4
+    )
     ds_test = ds_test.map(
         lambda e: tokenizer(e["sentence"], truncation=True, padding="max_length", max_length=seq_len),
-        batched=True, num_proc=4)
+        batched=True, num_proc=4
+    )
 
     ds_train.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
     ds_val.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
@@ -132,7 +134,7 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = cuda
     has_cuda = torch.cuda.is_available()
     cnt_cuda = torch.cuda.device_count()
-    device = torch.device("cpu" if not has_cuda else f"cuda")
+    device = torch.device("cpu" if not has_cuda else "cuda")
     logger.info(f"has_cuda: {has_cuda}; cnt_cuda: {cnt_cuda}; device: {device}")
 
     seed = int(args.seed)
@@ -250,7 +252,6 @@ if __name__ == "__main__":
 
     dataset_train, dataset_val, dataset_test = get_finpt_data(cur_ds_name=ds_name)
 
-    # get pos ratio of the training set for loss computing
     dataset_train_y = dataset_train["labels"]
     total_y = float(len(dataset_train_y))
     pos_y = float(sum(dataset_train_y))
@@ -265,10 +266,9 @@ if __name__ == "__main__":
     logger.info(f">>> model.neg_to_pos = {neg_to_pos}; model.use_pos_weight = {use_pos_weight}")
 
     if freeze:
-        # firstly, freeze all params
         for param in model.parameters():
             param.requires_grad = False
-        # unfreeze the last layer
+
         if model_class == "bert":
             for param in model.bert.encoder.layer[-1].parameters():
                 param.requires_grad = True
@@ -281,22 +281,19 @@ if __name__ == "__main__":
         elif model_class == "llama":
             for param in model.base_model.layers[-1].parameters():
                 param.requires_grad = True
-        else:
-            pass
-        # unfreeze the classifier
+
         if hasattr(model, "classifier"):
             model.classifier.weight.requires_grad = True
+
         for name, param in model.named_parameters():
             if param.requires_grad:
                 logger.info(f"param.requires_grad: {name}")
     else:
         for param in model.parameters():
             param.requires_grad = True
+
     logger.info(f">>> All parameters: {sum(p.numel() for p in model.parameters()) / int(1e6)} M")
     logger.info(f">>> Trainable params: {sum(p.numel() for p in model.parameters() if p.requires_grad) / int(1e6)} M")
-
-    wandb_key = "YOUR_WANDB_KEY"  # TODO: https://wandb.ai/
-    wandb.login(key=wandb_key)
 
     def compute_metrics_cls(eval_pred):
         preds, labels = eval_pred.predictions, eval_pred.label_ids
@@ -305,16 +302,15 @@ if __name__ == "__main__":
         preds_nan_sum = np.isnan(preds).sum()
         if preds_nan_sum > 0:
             logger.info(f">>> preds_nan_sum = {preds_nan_sum}")
-        preds = np.argmax(preds, axis=1)  # axis=-1
-        metric = {
+        preds = np.argmax(preds, axis=1)
+        return {
             "accuracy": accuracy_score(labels, preds),
             "f1": f1_score(labels, preds),
         }
-        return metric
 
     training_args = TrainingArguments(
         output_dir="./output/",
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="epoch",
         learning_rate=float(5e-5),
         per_device_train_batch_size=bsz,
@@ -325,9 +321,10 @@ if __name__ == "__main__":
         metric_for_best_model="f1",
         fp16=fp16,
         bf16=bf16,
-        # label_names=["label"],
-        # do_eval=True,
+        report_to="none",  # IMPORTANT: tắt wandb/tensorboard/mlflow...
+        # disable_tqdm=False,
     )
+
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -338,24 +335,23 @@ if __name__ == "__main__":
         compute_metrics=compute_metrics_cls,
     )
 
-    logger.info(f">>> Before training....")
+    logger.info(">>> Before training....")
     model.eval()
     eval_results = trainer.evaluate()
     logger.info(f"[{ds_name} - {model_class}] eval_results (before): {eval_results}")
-    # logger.info(f">>> Perplexity: {math.exp(eval_results['eval_loss']):.2f}")
     test_res = trainer.predict(dataset_test)
     logger.info(f"[{ds_name} - {model_class}] test_results (before): {test_res.metrics}")
 
-    logger.info(f">>> Start training....")
+    logger.info(">>> Start training....")
     model.train()
     trainer.train()
-    logger.info(f">>> model.nan_batch_count: {model.nan_batch_count}")
+    if hasattr(model, "nan_batch_count"):
+        logger.info(f">>> model.nan_batch_count: {model.nan_batch_count}")
 
-    logger.info(f">>> End training....")
+    logger.info(">>> End training....")
     model.eval()
     eval_results = trainer.evaluate()
     logger.info(f"[{ds_name} - {model_class}] eval_results (after): {eval_results}")
-    # logger.info(f">>> Perplexity: {math.exp(eval_results['eval_loss']):.2f}")
     test_res = trainer.predict(dataset_test)
     logger.info(f"[{ds_name} - {model_class}] test_results (after): {test_res.metrics}")
 
