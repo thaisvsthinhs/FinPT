@@ -17,8 +17,15 @@ import torch
 from datasets import load_dataset, Dataset
 from huggingface_hub import login
 
-from transformers import Trainer, TrainingArguments
-from transformers import BertTokenizer, GPT2Tokenizer, T5Tokenizer, LlamaTokenizer
+from transformers import (
+    Trainer,
+    TrainingArguments,
+    BertTokenizer,
+    GPT2Tokenizer,
+    T5Tokenizer,
+    LlamaTokenizer,
+    default_data_collator,
+)
 
 from model.finpt_bert import FinptBertForSequenceClassification
 from model.finpt_llama import FinptLlamaForSequenceClassification
@@ -30,8 +37,13 @@ from utils.seed import set_seed
 def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
     global bsz
 
-    # NOTE: trust_remote_code=True để tránh warning và tương thích tương lai
-    data = load_dataset("yuweiyin/FinBench", cur_ds_name, cache_dir=cache_ds, trust_remote_code=True)
+    # NOTE: trust_remote_code=True để tương thích tương lai
+    data = load_dataset(
+        "yuweiyin/FinBench",
+        cur_ds_name,
+        cache_dir=cache_ds,
+        trust_remote_code=True,
+    )
 
     fin_text_train = data["train"]["X_profile"]
     fin_text_validation = data["validation"]["X_profile"]
@@ -47,8 +59,7 @@ def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
         f">>> len(fin_text_test) = {len(fin_text_test)}; len(label_test) = {len(label_test)}"
     )
 
-    # === FIX (NumPy 2.0 / datasets set_format torch) ==========================
-    # Tính trực tiếp từ list label_train (python list) để tránh dataset_train["labels"]
+    # === FIX: tính trực tiếp từ list để tránh dataset["labels"] sau set_format(torch)
     total_y = float(len(label_train))
     pos_y = float(sum(label_train))
     assert total_y >= pos_y > 0.0
@@ -119,11 +130,10 @@ def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
         num_proc=4,
     )
 
-    ds_train.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
-    ds_val.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
-    ds_test.set_format(type="torch", columns=["input_ids", "attention_mask", "sentence", "labels", "labels_text"])
+    # === CRITICAL FIX: KHÔNG set_format(type="torch") để tránh datasets->numpy(copy=False) nổ với NumPy 2.0
+    # Trainer sẽ dùng data_collator để chuyển list -> torch tensors.
+    # =======================================================================================================
 
-    # Return thêm pos_ratio, neg_to_pos để main dùng luôn
     return ds_train, ds_val, ds_test, pos_ratio, neg_to_pos
 
 
@@ -195,7 +205,7 @@ if __name__ == "__main__":
 
     set_seed(seed)
 
-    # hf_token = "YOUR_ACCESS_TOKENS"  # TODO: https://huggingface.co/settings/tokens
+    # hf_token = "YOUR_ACCESS_TOKENS"
     # login(token=hf_token)
 
     cache_dir = "~/.cache/huggingface/"
@@ -207,9 +217,7 @@ if __name__ == "__main__":
         model_class = "bert"
         hf_model_id = "bert-base-cased"
         tokenizer = BertTokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptBertForSequenceClassification.from_pretrained(
-            hf_model_id, num_labels=2, cache_dir=cache_model
-        )
+        model = FinptBertForSequenceClassification.from_pretrained(hf_model_id, num_labels=2, cache_dir=cache_model)
         fp8 = False
         freeze = False
 
@@ -217,9 +225,7 @@ if __name__ == "__main__":
         model_class = "bert"
         hf_model_id = "yiyanghkust/finbert-pretrain"
         tokenizer = BertTokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptBertForSequenceClassification.from_pretrained(
-            hf_model_id, num_labels=2, cache_dir=cache_model
-        )
+        model = FinptBertForSequenceClassification.from_pretrained(hf_model_id, num_labels=2, cache_dir=cache_model)
         fp8 = False
         freeze = False
 
@@ -227,52 +233,41 @@ if __name__ == "__main__":
         model_class = "gpt"
         hf_model_id = "gpt2"
         tokenizer = GPT2Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptGPT2ForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
-        )
+        model = FinptGPT2ForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
         freeze = False
 
     elif model_name == "t5-base":
         model_class = "t5"
         hf_model_id = "t5-base"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptT5ForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
-        )
+        model = FinptT5ForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
         freeze = False
 
     elif model_name == "flan-t5-base":
         model_class = "t5"
         hf_model_id = "google/flan-t5-base"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptT5ForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
-        )
+        model = FinptT5ForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
         freeze = False
 
     elif model_name == "t5-xxl":
         model_class = "t5"
         hf_model_id = "t5-11b"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptT5ForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
-        )
+        model = FinptT5ForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
         freeze = True
 
     elif model_name == "flan-t5-xxl":
         model_class = "t5"
         hf_model_id = "google/flan-t5-xxl"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptT5ForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
-        )
+        model = FinptT5ForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
         freeze = True
 
     elif model_name == "llama-7b":
         model_class = "llama"
         hf_model_id = "openlm-research/open_llama_7b"
         tokenizer = LlamaTokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        # NOTE: không truyền load_in_8bit vào class custom nếu __init__ không nhận
         model = FinptLlamaForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model)
         freeze = True
 
@@ -280,7 +275,6 @@ if __name__ == "__main__":
         model_class = "llama"
         hf_model_id = "openlm-research/open_llama_13b"
         tokenizer = LlamaTokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        # nếu class của bạn chưa hỗ trợ load_in_8bit thì cũng phải bỏ tham số này
         model = FinptLlamaForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model)
         freeze = True
 
@@ -310,10 +304,9 @@ if __name__ == "__main__":
         tokenizer.mask_token = tokenizer.eos_token
     logger.info(f">>> tokenizer.all_special_tokens (after): {tokenizer.all_special_tokens}")
 
-    # === FIX: nhận thêm pos_ratio, neg_to_pos từ get_finpt_data =================
     dataset_train, dataset_val, dataset_test, pos_ratio, neg_to_pos = get_finpt_data(cur_ds_name=ds_name)
     logger.info(f">>> pos_ratio = {pos_ratio}; neg_to_pos = {neg_to_pos}")
-    # ===========================================================================
+
     model.neg_to_pos = neg_to_pos
     model.use_pos_weight = use_pos_weight
     model.tokenizer = tokenizer
@@ -329,7 +322,7 @@ if __name__ == "__main__":
         elif model_class == "gpt":
             for param in model.transformer.h[-1].parameters():
                 param.requires_grad = True
-        elif model_class == "t5" or model_class == "flan_t5":
+        elif model_class in ("t5", "flan_t5"):
             for param in model.decoder.block[-1].parameters():
                 param.requires_grad = True
         elif model_class == "llama":
@@ -375,17 +368,18 @@ if __name__ == "__main__":
         metric_for_best_model="f1",
         fp16=fp16,
         bf16=bf16,
-        report_to="none",  # tắt wandb/tensorboard/mlflow...
-        # disable_tqdm=False,
+        report_to="none",
     )
+
+    # CRITICAL: data_collator sẽ chuyển list -> torch tensors (tránh datasets torch formatter)
+    data_collator = default_data_collator
 
     trainer = Trainer(
         model=model,
         args=training_args,
-#        tokenizer=tokenizer,
         train_dataset=dataset_train,
         eval_dataset=dataset_val,
-        data_collator=None,
+        data_collator=data_collator,
         compute_metrics=compute_metrics_cls,
     )
 
@@ -423,5 +417,4 @@ if __name__ == "__main__":
     del trainer
     gc.collect()
     torch.cuda.empty_cache()
-
     sys.exit(0)
