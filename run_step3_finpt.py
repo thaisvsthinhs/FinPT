@@ -59,7 +59,7 @@ def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
         f">>> len(fin_text_test) = {len(fin_text_test)}; len(label_test) = {len(label_test)}"
     )
 
-    # === FIX: tính trực tiếp từ list để tránh dataset["labels"] sau set_format(torch)
+    # === FIX: tính trực tiếp từ list để tránh datasets/NumPy 2.0 copy=False bug
     total_y = float(len(label_train))
     pos_y = float(sum(label_train))
     assert total_y >= pos_y > 0.0
@@ -130,10 +130,8 @@ def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
         num_proc=4,
     )
 
-    # === CRITICAL FIX: KHÔNG set_format(type="torch") để tránh datasets->numpy(copy=False) nổ với NumPy 2.0
+    # CRITICAL: KHÔNG set_format(type="torch") để tránh datasets->numpy(copy=False) nổ với NumPy 2.0
     # Trainer sẽ dùng data_collator để chuyển list -> torch tensors.
-    # =======================================================================================================
-
     return ds_train, ds_val, ds_test, pos_ratio, neg_to_pos
 
 
@@ -233,35 +231,45 @@ if __name__ == "__main__":
         model_class = "gpt"
         hf_model_id = "gpt2"
         tokenizer = GPT2Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptGPT2ForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
+        model = FinptGPT2ForSequenceClassification.from_pretrained(
+            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
+        )
         freeze = False
 
     elif model_name == "t5-base":
         model_class = "t5"
         hf_model_id = "t5-base"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptT5ForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
+        model = FinptT5ForSequenceClassification.from_pretrained(
+            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
+        )
         freeze = False
 
     elif model_name == "flan-t5-base":
         model_class = "t5"
         hf_model_id = "google/flan-t5-base"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptT5ForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
+        model = FinptT5ForSequenceClassification.from_pretrained(
+            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
+        )
         freeze = False
 
     elif model_name == "t5-xxl":
         model_class = "t5"
         hf_model_id = "t5-11b"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptT5ForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
+        model = FinptT5ForSequenceClassification.from_pretrained(
+            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
+        )
         freeze = True
 
     elif model_name == "flan-t5-xxl":
         model_class = "t5"
         hf_model_id = "google/flan-t5-xxl"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptT5ForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
+        model = FinptT5ForSequenceClassification.from_pretrained(
+            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
+        )
         freeze = True
 
     elif model_name == "llama-7b":
@@ -281,11 +289,12 @@ if __name__ == "__main__":
     else:
         raise ValueError(f">>> ValueError: model_name = {model_name}")
 
+    # =========================
+    # CRITICAL FIX (fp16 AMP):
+    # KHÔNG tự cast model sang float16. Để Trainer/Accelerate xử lý fp16.
+    # =========================
     if not fp8:
-        if fp16:
-            model = model.to(device=device, dtype=torch.float16)
-        else:
-            model = model.to(device=device)
+        model = model.to(device=device)
 
     logger.info(f">>> tokenizer.all_special_tokens (before): {tokenizer.all_special_tokens}")
     if model_class == "bert" and tokenizer.eos_token is None:
@@ -355,6 +364,8 @@ if __name__ == "__main__":
             "f1": f1_score(labels, preds),
         }
 
+    # NOTE: dùng fp16=args.fp16, bf16=args.bf16 cho nhất quán
+    # Và không hardcode fp16=True nếu bạn muốn bật/tắt qua CLI.
     training_args = TrainingArguments(
         output_dir="./output/",
         eval_strategy="epoch",
@@ -367,9 +378,11 @@ if __name__ == "__main__":
         weight_decay=0.01,
         load_best_model_at_end=True,
         metric_for_best_model="f1",
-        fp16=True,
-        bf16=False,
+        fp16=fp16,
+        bf16=bf16,
         report_to="none",
+        # Nếu vẫn gặp vấn đề clip_grad_norm, có thể bật dòng này:
+        # max_grad_norm=0.0,
     )
 
     # CRITICAL: data_collator sẽ chuyển list -> torch tensors (tránh datasets torch formatter)
