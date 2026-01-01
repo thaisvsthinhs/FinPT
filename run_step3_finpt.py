@@ -30,7 +30,9 @@ from utils.seed import set_seed
 def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
     global bsz
 
-    data = load_dataset("yuweiyin/FinBench", cur_ds_name, cache_dir=cache_ds)
+    # NOTE: trust_remote_code=True để tránh warning và tương thích tương lai
+    data = load_dataset("yuweiyin/FinBench", cur_ds_name, cache_dir=cache_ds, trust_remote_code=True)
+
     fin_text_train = data["train"]["X_profile"]
     fin_text_validation = data["validation"]["X_profile"]
     fin_text_test = data["test"]["X_profile"]
@@ -38,17 +40,31 @@ def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
     label_train = data["train"]["y"]
     label_validation = data["validation"]["y"]
     label_test = data["test"]["y"]
-    logger.info(f">>> len(fin_text_train) = {len(fin_text_train)}; len(label_train) = {len(label_train)};\n"
-                f">>> len(fin_text_val) = {len(fin_text_validation)}; len(label_val) = {len(label_validation)};\n"
-                f">>> len(fin_text_test) = {len(fin_text_test)}; len(label_test) = {len(label_test)}")
+
+    logger.info(
+        f">>> len(fin_text_train) = {len(fin_text_train)}; len(label_train) = {len(label_train)};\n"
+        f">>> len(fin_text_val) = {len(fin_text_validation)}; len(label_val) = {len(label_validation)};\n"
+        f">>> len(fin_text_test) = {len(fin_text_test)}; len(label_test) = {len(label_test)}"
+    )
+
+    # === FIX (NumPy 2.0 / datasets set_format torch) ==========================
+    # Tính trực tiếp từ list label_train (python list) để tránh dataset_train["labels"]
+    total_y = float(len(label_train))
+    pos_y = float(sum(label_train))
+    assert total_y >= pos_y > 0.0
+    neg_to_pos = float((total_y - pos_y) / pos_y)
+    pos_ratio = float(pos_y / total_y)
+    # ========================================================================
 
     fin_text_train_len = [len(tokenizer.encode(text)) for text in fin_text_train]
     fin_text_val_len = [len(tokenizer.encode(text)) for text in fin_text_validation]
     fin_text_test_len = [len(tokenizer.encode(text)) for text in fin_text_test]
     assert len(fin_text_train_len) > 0 and len(fin_text_val_len) > 0 and len(fin_text_test_len) > 0
+
     fin_text_train_len_avg = sum(fin_text_train_len) / len(fin_text_train_len)
     fin_text_val_len_avg = sum(fin_text_val_len) / len(fin_text_val_len)
     fin_text_test_len_avg = sum(fin_text_test_len) / len(fin_text_test_len)
+
     logger.info(f">>> fin_text_train_len_avg = {fin_text_train_len_avg}")
     logger.info(f">>> fin_text_val_len_avg = {fin_text_val_len_avg}")
     logger.info(f">>> fin_text_test_len_avg = {fin_text_test_len_avg}")
@@ -66,6 +82,7 @@ def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
             bsz = int(bsz / 4)
         if bsz <= 1:
             bsz = 1
+
     logger.info(f">>> seq_len = {seq_len}; bsz = {bsz}")
 
     label_train_text = ["Yes" if label == 1 else "No" for label in label_train]
@@ -75,6 +92,7 @@ def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
     fin_text_train = [f"{t_in} {tokenizer.eos_token}" for t_in in fin_text_train]
     fin_text_validation = [f"{t_in} {tokenizer.eos_token}" for t_in in fin_text_validation]
     fin_text_test = [f"{t_in} {tokenizer.eos_token}" for t_in in fin_text_test]
+
     ds_train = {"sentence": fin_text_train, "labels": label_train, "labels_text": label_train_text}
     ds_val = {"sentence": fin_text_validation, "labels": label_validation, "labels_text": label_validation_text}
     ds_test = {"sentence": fin_text_test, "labels": label_test, "labels_text": label_test_text}
@@ -85,39 +103,65 @@ def get_finpt_data(cur_ds_name: str, fix_seq_len: int = None):
 
     ds_train = ds_train.map(
         lambda e: tokenizer(e["sentence"], truncation=True, padding="max_length", max_length=seq_len),
-        remove_columns=["sentence"], batched=True, num_proc=4
+        remove_columns=["sentence"],
+        batched=True,
+        num_proc=4,
     )
     ds_val = ds_val.map(
         lambda e: tokenizer(e["sentence"], truncation=True, padding="max_length", max_length=seq_len),
-        remove_columns=["sentence"], batched=True, num_proc=4
+        remove_columns=["sentence"],
+        batched=True,
+        num_proc=4,
     )
     ds_test = ds_test.map(
         lambda e: tokenizer(e["sentence"], truncation=True, padding="max_length", max_length=seq_len),
-        batched=True, num_proc=4
+        batched=True,
+        num_proc=4,
     )
 
     ds_train.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
     ds_val.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
     ds_test.set_format(type="torch", columns=["input_ids", "attention_mask", "sentence", "labels", "labels_text"])
 
-    return ds_train, ds_val, ds_test
+    # Return thêm pos_ratio, neg_to_pos để main dùng luôn
+    return ds_train, ds_val, ds_test, pos_ratio, neg_to_pos
 
 
 if __name__ == "__main__":
     logging.basicConfig(
         format="[%(asctime)s - %(levelname)s - %(name)s] -   %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
     )
     logger = logging.getLogger(__name__)
 
     parser = argparse.ArgumentParser(description="FinPT args")
     parser.add_argument("--cuda", type=str, default="cpu", help="Specify which device to use")
     parser.add_argument("--seed", type=int, default=0, help="Seed of random modules")
-    parser.add_argument("--ds_name", type=str, default="cd1", help="Specify which dataset to use.",
-                        choices=["cd1", "cd2", "ld1", "ld2", "ld3", "cf1", "cf2", "cc1", "cc2", "cc3"])
-    parser.add_argument("--model_name", type=str, default="gpt2", help="Specify which model to use.",
-                        choices=["bert", "finbert", "gpt2", "t5-base", "flan-t5-base",
-                                 "t5-xxl", "flan-t5-xxl", "llama-7b", "llama-13b"])
+    parser.add_argument(
+        "--ds_name",
+        type=str,
+        default="cd1",
+        help="Specify which dataset to use.",
+        choices=["cd1", "cd2", "ld1", "ld2", "ld3", "cf1", "cf2", "cc1", "cc2", "cc3"],
+    )
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="gpt2",
+        help="Specify which model to use.",
+        choices=[
+            "bert",
+            "finbert",
+            "gpt2",
+            "t5-base",
+            "flan-t5-base",
+            "t5-xxl",
+            "flan-t5-xxl",
+            "llama-7b",
+            "llama-13b",
+        ],
+    )
     parser.add_argument("--bsz", type=int, default=128, help="TrainingArguments: per_device_train/eval_batch_size")
     parser.add_argument("--epoch", type=int, default=100, help="TrainingArguments: num_train_epochs")
     parser.add_argument("--fp8", action="store_true", help="Using 8bit precision")
@@ -164,66 +208,82 @@ if __name__ == "__main__":
         hf_model_id = "bert-base-cased"
         tokenizer = BertTokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
         model = FinptBertForSequenceClassification.from_pretrained(
-            hf_model_id, num_labels=2, cache_dir=cache_model)
+            hf_model_id, num_labels=2, cache_dir=cache_model
+        )
         fp8 = False
         freeze = False
+
     elif model_name == "finbert":
         model_class = "bert"
         hf_model_id = "yiyanghkust/finbert-pretrain"
         tokenizer = BertTokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
         model = FinptBertForSequenceClassification.from_pretrained(
-            hf_model_id, num_labels=2, cache_dir=cache_model)
+            hf_model_id, num_labels=2, cache_dir=cache_model
+        )
         fp8 = False
         freeze = False
+
     elif model_name == "gpt2":
         model_class = "gpt"
         hf_model_id = "gpt2"
         tokenizer = GPT2Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
         model = FinptGPT2ForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
+            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
+        )
         freeze = False
+
     elif model_name == "t5-base":
         model_class = "t5"
         hf_model_id = "t5-base"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
         model = FinptT5ForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
+            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
+        )
         freeze = False
+
     elif model_name == "flan-t5-base":
         model_class = "t5"
         hf_model_id = "google/flan-t5-base"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
         model = FinptT5ForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
+            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
+        )
         freeze = False
+
     elif model_name == "t5-xxl":
         model_class = "t5"
         hf_model_id = "t5-11b"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
         model = FinptT5ForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
+            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
+        )
         freeze = True
+
     elif model_name == "flan-t5-xxl":
         model_class = "t5"
         hf_model_id = "google/flan-t5-xxl"
         tokenizer = T5Tokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
         model = FinptT5ForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
+            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8
+        )
         freeze = True
+
     elif model_name == "llama-7b":
         model_class = "llama"
         hf_model_id = "openlm-research/open_llama_7b"
         tokenizer = LlamaTokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptLlamaForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model)
+        # NOTE: không truyền load_in_8bit vào class custom nếu __init__ không nhận
+        model = FinptLlamaForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model)
         freeze = True
+
     elif model_name == "llama-13b":
         model_class = "llama"
         hf_model_id = "openlm-research/open_llama_13b"
         tokenizer = LlamaTokenizer.from_pretrained(hf_model_id, cache_dir=cache_model)
-        model = FinptLlamaForSequenceClassification.from_pretrained(
-            hf_model_id, cache_dir=cache_model, load_in_8bit=fp8)
+        # nếu class của bạn chưa hỗ trợ load_in_8bit thì cũng phải bỏ tham số này
+        model = FinptLlamaForSequenceClassification.from_pretrained(hf_model_id, cache_dir=cache_model)
         freeze = True
+
     else:
         raise ValueError(f">>> ValueError: model_name = {model_name}")
 
@@ -250,16 +310,10 @@ if __name__ == "__main__":
         tokenizer.mask_token = tokenizer.eos_token
     logger.info(f">>> tokenizer.all_special_tokens (after): {tokenizer.all_special_tokens}")
 
-    dataset_train, dataset_val, dataset_test = get_finpt_data(cur_ds_name=ds_name)
-
-    dataset_train_y = dataset_train["labels"]
-    total_y = float(len(dataset_train_y))
-    pos_y = float(sum(dataset_train_y))
-    assert total_y >= pos_y > 0.0
-    neg_to_pos = float((total_y - pos_y) / pos_y)
-    pos_ratio = float(pos_y / total_y)
+    # === FIX: nhận thêm pos_ratio, neg_to_pos từ get_finpt_data =================
+    dataset_train, dataset_val, dataset_test, pos_ratio, neg_to_pos = get_finpt_data(cur_ds_name=ds_name)
     logger.info(f">>> pos_ratio = {pos_ratio}; neg_to_pos = {neg_to_pos}")
-
+    # ===========================================================================
     model.neg_to_pos = neg_to_pos
     model.use_pos_weight = use_pos_weight
     model.tokenizer = tokenizer
@@ -321,7 +375,7 @@ if __name__ == "__main__":
         metric_for_best_model="f1",
         fp16=fp16,
         bf16=bf16,
-        report_to="none",  # IMPORTANT: tắt wandb/tensorboard/mlflow...
+        report_to="none",  # tắt wandb/tensorboard/mlflow...
         # disable_tqdm=False,
     )
 
