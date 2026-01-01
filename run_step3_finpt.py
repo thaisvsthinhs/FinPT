@@ -365,25 +365,21 @@ if __name__ == "__main__":
         }
 
     # NOTE: dùng fp16=args.fp16, bf16=args.bf16 cho nhất quán
-    # Và không hardcode fp16=True nếu bạn muốn bật/tắt qua CLI.
     training_args = TrainingArguments(
         output_dir="./output/",
         eval_strategy="epoch",
-        save_strategy="epoch",
+        save_strategy="no",           
         learning_rate=5e-5,
-        save_total_limit=2,
         per_device_train_batch_size=2,
         per_device_eval_batch_size=1,
         gradient_accumulation_steps=4,
         num_train_epochs=epoch,
         weight_decay=0.01,
-        load_best_model_at_end=True,
-        metric_for_best_model="f1",
+        load_best_model_at_end=False, 
         fp16=fp16,
         bf16=bf16,
         report_to="none",
     )
-
     # CRITICAL: data_collator sẽ chuyển list -> torch tensors (tránh datasets torch formatter)
     data_collator = default_data_collator
 
