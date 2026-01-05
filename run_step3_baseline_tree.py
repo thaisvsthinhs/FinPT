@@ -9,6 +9,7 @@ import sys
 import logging
 import argparse
 import gc
+import pickle  # === ADD ===
 
 import numpy as np
 
@@ -31,8 +32,8 @@ def run_baselines(cur_ds_name, cur_model_name):
     val_set = data["validation"] if "train" in data else []
     test_set = data["test"] if "train" in data else []
 
-    x_key = "X_ml"
-    # x_key = "X_ml_unscale"
+    # x_key = "X_ml"
+    x_key = "X_ml_unscale"
     train_X_ml, train_y = np.asarray(train_set[x_key], dtype=np.float32), np.asarray(train_set["y"], dtype=np.int64)
     val_X_ml, val_y = np.asarray(val_set[x_key], dtype=np.float32), np.asarray(val_set["y"], dtype=np.int64)
     test_X_ml, test_y = np.asarray(test_set[x_key], dtype=np.float32), np.asarray(test_set["y"], dtype=np.int64)
@@ -56,6 +57,14 @@ def run_baselines(cur_ds_name, cur_model_name):
     else:
         model.fit(train_X_ml, train_y)
         best_model = model
+
+    # ===== ADD: SAVE MODEL (model_dataset.pkl) =====
+    model_filename = f"{cur_model_name}_{cur_ds_name}.pkl"
+    model_path = os.path.join(save_model_dir, model_filename)
+    with open(model_path, "wb") as f:
+        pickle.dump(best_model, f)
+    logger.info(f">>> Saved model to {model_path}")
+    # ===== END ADD =====
 
     y_pred_train = best_model.predict(train_X_ml)
     acc_train, f1_train, auc_train, p_train, r_train, avg_p_train = \
@@ -135,6 +144,11 @@ if __name__ == "__main__":
     os.environ["TRANSFORMERS_CACHE"] = cache_dir
     cache_model = os.path.join(cache_dir, "models")
     cache_ds = os.path.join(cache_dir, "datasets")
+
+    # ===== ADD: CREATE SAVE DIR (keep other logic unchanged) =====
+    save_model_dir = "./saved_models"
+    os.makedirs(save_model_dir, exist_ok=True)
+    # ===== END ADD =====
 
     eval_results_train = dict({})  # dict{ds_name: Tuple(acc, f1, auc, p, r, avg_p)}
     eval_results_val = dict({})
