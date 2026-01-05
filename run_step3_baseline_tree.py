@@ -10,7 +10,7 @@ import logging
 import argparse
 import gc
 import pickle  # === ADD ===
-
+import json
 import numpy as np
 
 from sklearn.model_selection import GridSearchCV
@@ -32,7 +32,6 @@ def run_baselines(cur_ds_name, cur_model_name):
     val_set = data["validation"] if "train" in data else []
     test_set = data["test"] if "train" in data else []
 
-    # x_key = "X_ml"
     x_key = "X_ml_unscale"
     train_X_ml, train_y = np.asarray(train_set[x_key], dtype=np.float32), np.asarray(train_set["y"], dtype=np.int64)
     val_X_ml, val_y = np.asarray(val_set[x_key], dtype=np.float32), np.asarray(val_set["y"], dtype=np.int64)
@@ -58,14 +57,27 @@ def run_baselines(cur_ds_name, cur_model_name):
         model.fit(train_X_ml, train_y)
         best_model = model
 
-    # ===== ADD: SAVE MODEL (model_dataset.pkl) =====
     model_filename = f"{cur_model_name}_{cur_ds_name}.pkl"
     model_path = os.path.join(save_model_dir, model_filename)
     with open(model_path, "wb") as f:
         pickle.dump(best_model, f)
     logger.info(f">>> Saved model to {model_path}")
-    # ===== END ADD =====
 
+    sample_data = train_set[0]
+    metadata = {
+        "col_name": sample_data["col_name"], # Tên cột (Tuổi, Lương...)
+        "cat_str": sample_data["cat_str"],   # Quy tắc map chữ -> số
+        "cat_idx": sample_data["cat_idx"],   # Vị trí cột phân loại
+        "num_idx": sample_data["num_idx"]    # Vị trí cột số
+    }
+    
+    metadata_filename = f"{cur_ds_name}_metadata.json"
+    metadata_path = os.path.join(save_model_dir, metadata_filename)
+    with open(metadata_path, "w", encoding='utf-8') as f:
+        json.dump(metadata, f, indent=4)
+        
+    logger.info(f">>> Saved METADATA to {metadata_path}")
+    
     y_pred_train = best_model.predict(train_X_ml)
     acc_train, f1_train, auc_train, p_train, r_train, avg_p_train = \
         accuracy_score(train_y, y_pred_train), f1_score(train_y, y_pred_train), roc_auc_score(train_y, y_pred_train), \
