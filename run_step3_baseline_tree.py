@@ -157,10 +157,8 @@ if __name__ == "__main__":
     cache_model = os.path.join(cache_dir, "models")
     cache_ds = os.path.join(cache_dir, "datasets")
 
-    # ===== ADD: CREATE SAVE DIR (keep other logic unchanged) =====
-    save_model_dir = "./saved_models"
+    save_model_dir = "/kaggle/working/saved_models"
     os.makedirs(save_model_dir, exist_ok=True)
-    # ===== END ADD =====
 
     eval_results_train = dict({})  # dict{ds_name: Tuple(acc, f1, auc, p, r, avg_p)}
     eval_results_val = dict({})
