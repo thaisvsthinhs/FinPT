@@ -1,0 +1,48 @@
+{
+    "col_name": [
+        "age",
+        "gender",
+        "income",
+        "balance",
+        "vintage",
+        "transaction_status",
+        "product_holdings",
+        "credit_card",
+        "credit_type"
+    ],
+    "cat_str": [
+        [
+            "female",
+            "male"
+        ],
+        [
+            "10L-15L",
+            "5L-10L",
+            "less_than_5L",
+            "more_than_15L"
+        ],
+        [
+            "1",
+            "2",
+            "3+"
+        ],
+        [
+            "average",
+            "good",
+            "poor"
+        ]
+    ],
+    "cat_idx": [
+        1,
+        2,
+        6,
+        8
+    ],
+    "num_idx": [
+        0,
+        3,
+        4,
+        5,
+        7
+    ]
+}

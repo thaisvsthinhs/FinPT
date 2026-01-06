@@ -1,0 +1,59 @@
+{
+    "col_name": [
+        "age",
+        "income",
+        "home_ownership",
+        "year_of_employment",
+        "loan_intent",
+        "loan_grade",
+        "loan_amount",
+        "loan_interest_rate",
+        "loan_percent_income",
+        "historical_default",
+        "credit_history_length"
+    ],
+    "cat_str": [
+        [
+            "mortgage",
+            "other",
+            "own",
+            "rent"
+        ],
+        [
+            "debt_consolidation",
+            "education",
+            "home_improvement",
+            "medical",
+            "personal",
+            "venture"
+        ],
+        [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G"
+        ],
+        [
+            "no",
+            "yes"
+        ]
+    ],
+    "cat_idx": [
+        2,
+        4,
+        5,
+        9
+    ],
+    "num_idx": [
+        0,
+        1,
+        3,
+        6,
+        7,
+        8,
+        10
+    ]
+}
