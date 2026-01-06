@@ -2,9 +2,11 @@ import json
 import pickle
 import numpy as np
 import os
+import shap
+import pandas as pd
 
-MODEL_PATH = "/kaggle/working/saved_models/RandomForestClassifier_cd2.pkl"
-METADATA_PATH = "/kaggle/working/saved_models/cd2_metadata.json"
+MODEL_PATH = "/kaggle/input/finpt-data/checkpoint/RandomForestClassifier_cc1.pkl"
+METADATA_PATH = "/kaggle/input/finpt-data/checkpoint/cc1_metadata.json"
 
 def load_resources():
     if not os.path.exists(MODEL_PATH) or not os.path.exists(METADATA_PATH):
@@ -26,8 +28,6 @@ def preprocess_input(user_input, metadata):
     feature_vector = []
     current_cat_pointer = 0 
     
-    print("\n--- BẮT ĐẦU XỬ LÝ INPUT ---")
-    
     for i, col_name in enumerate(col_names):
         if col_name not in user_input:
             raise ValueError(f"Thiếu thông tin đầu vào cho trường: {col_name}")
@@ -39,10 +39,8 @@ def preprocess_input(user_input, metadata):
             try:
                 processed_val = valid_options.index(raw_val)
             except ValueError:
-                print(f"Cảnh báo: Giá trị '{raw_val}' không hợp lệ cho '{col_name}'. Mặc định về 0 ({valid_options[0]}).")
                 processed_val = 0
-                
-            print(f"Mapping '{col_name}': '{raw_val}' -> {processed_val}")
+            
             feature_vector.append(processed_val)
             current_cat_pointer += 1
             
@@ -55,54 +53,70 @@ def preprocess_input(user_input, metadata):
 
     return np.array([feature_vector])
 
+def explain_prediction(real_model, input_vector, feature_names):
+    print("\n--- PHÂN TÍCH SHAP VALUES ---")
+    
+    explainer = shap.TreeExplainer(real_model)
+    shap_values = explainer.shap_values(input_vector)
+    
+    if isinstance(shap_values, list):
+        shap_values_class1 = shap_values[1]
+    else:
+        shap_values_class1 = shap_values
+        if len(shap_values_class1.shape) > 2:
+            shap_values_class1 = shap_values_class1[:, :, 1]
+
+    feature_importance = pd.DataFrame({
+        "Feature": feature_names,
+        "Value_Input": input_vector[0],
+        "SHAP_Value": shap_values_class1[0]
+    })
+    
+    feature_importance["Abs_SHAP"] = feature_importance["SHAP_Value"].abs()
+    feature_importance = feature_importance.sort_values(
+        by="Abs_SHAP",
+        ascending=False
+    ).drop(columns=["Abs_SHAP"])
+    
+    print(feature_importance.to_string(index=False))
+    
+    return explainer, shap_values
+
 if __name__ == "__main__":
     model, metadata = load_resources()
 
     sample_input = {
-        "credit_limit_in_NT_dollars": 10000,
-        "gender": "male",
-        "education": "high_school",
-        "marriage": "other",
-        "age": 40,
-        "repayment_status_in_September_2005": "payment delay for eight months",
-        "repayment_status_in_August_2005": "payment delay for seven months",
-        "repayment_status_in_July_2005": "payment delay for six months",
-        "repayment_status_in_June_2005": "payment delay for five months",
-        "repayment_status_in_May_2005": "payment delay for four months",
-        "repayment_status_in_April_2005": "payment delay for three months",
-        "amount_of_bill_statement_in_September_2005": 15000,
-        "amount_of_bill_statement_in_August_2005": 14800,
-        "amount_of_bill_statement_in_July_2005": 14500,
-        "amount_of_bill_statement_in_June_2005": 14000,
-        "amount_of_bill_statement_in_May_2005": 13500,
-        "amount_of_bill_statement_in_April_2005": 13000,
-        "amount_of_previous_payment_in_September_2005": 0,
-        "amount_of_previous_payment_in_August_2005": 0,
-        "amount_of_previous_payment_in_July_2005": 0,
-        "amount_of_previous_payment_in_June_2005": 0,
-        "amount_of_previous_payment_in_May_2005": 0,
-        "amount_of_previous_payment_in_April_2005": 0
+        "age": 45,
+        "balance": 100000.0,
+        "vintage": 0.5,
+        "transaction_status": 0,
+        "credit_card": 0,
+        "gender": "female",
+        "income": "less_than_5L",
+        "product_holdings": "1",
+        "credit_type": "poor"
     }
 
     try:
         input_vector = preprocess_input(sample_input, metadata)
 
         real_model = model
-        if hasattr(model, 'clf'):
-            print(">>> Đã tìm thấy model thật trong biến '.clf'")
+        if hasattr(model, "clf"):
             real_model = model.clf
-        elif hasattr(model, 'model'):
-            print(">>> Đã tìm thấy model thật trong biến '.model'")
+        elif hasattr(model, "model"):
             real_model = model.model
 
         prediction = real_model.predict(input_vector)
+        probability = real_model.predict_proba(input_vector)
+        
         print(f"Label dự đoán: {prediction[0]}")
+        print(f"Xác suất Rời bỏ: {probability[0][1]:.4f}")
 
-        try:
-            probability = real_model.predict_proba(input_vector)
-            print(f"Xác suất (0 vs 1): {probability[0]}")
-        except AttributeError:
-            print("Model này không hỗ trợ predict_proba().")
+        explainer, shap_values = explain_prediction(
+            real_model,
+            input_vector,
+            metadata["col_name"]
+        )
 
     except Exception as e:
         print(f"\nLỖI: {e}")
