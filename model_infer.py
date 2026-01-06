@@ -5,8 +5,8 @@ import os
 import shap
 import pandas as pd
 
-MODEL_PATH = "/kaggle/input/finpt-data/checkpoint/RandomForestClassifier_cc1.pkl"
-METADATA_PATH = "/kaggle/input/finpt-data/checkpoint/cc1_metadata.json"
+MODEL_PATH = "/checkpoint/RandomForestClassifier_cc1.pkl"
+METADATA_PATH = "/checkpoint/cc1_metadata.json"
 
 def load_resources():
     if not os.path.exists(MODEL_PATH) or not os.path.exists(METADATA_PATH):
